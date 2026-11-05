@@ -3,6 +3,27 @@ import imageio.v2 as imageio
 from matplotlib import pyplot
 
 
+def new_kernel(x,y,z):
+    new_var = str(x) + str(y) + str(z)
+    match new_var:
+        case "111":
+            return 0
+        case "110":
+            return 1
+        case "101":
+            return 0
+        case "100":
+            return 1
+        case "011":
+            return 1
+        case "010":
+            return 0
+        case "001":
+            return 1
+        case "000":
+            return 0
+
+
 class XORCell(mesa.Agent):
     def __init__(self, model, row, col):
         super().__init__(model)
@@ -37,7 +58,9 @@ class XORAutomaton(mesa.Model):
         for c in range(self.size):
             left = previous[c - 1] if c > 0 else 0
             right = previous[c + 1] if c < self.size - 1 else 0
-            new_row[c] = left ^ right; # xor operation
+            center = previous[c]
+            #new_row[c]=right^left #XOR
+            new_row[c] = new_kernel(int(left), int(center), int(right))
 
         self.grid[r] = new_row
 
