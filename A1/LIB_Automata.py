@@ -11,10 +11,11 @@ class XORCell(mesa.Agent):
         self.state = 0
 
 class XORAutomaton(mesa.Model):
-    def __init__(self, size=50, sim=1):
+    def __init__(self, size=50, sim=1, Density=0.5):
         super().__init__()
         self.size = size
         self.sim = sim
+        self.Density = Density
         self.grid = numpy.zeros((size, size), dtype=numpy.uint8)
 
         self.cells = [
@@ -24,10 +25,13 @@ class XORAutomaton(mesa.Model):
 
         # self.grid[0, size // 2] = 1
         # self.cells[0][size // 2].state = 1
+        # Density = probability that a cell starts alive (1), uniform distribution
         if sim == 1:
-            self.grid[0] = numpy.random.randint(0, 2, size) # sim 1: random first row
+            y = numpy.random.rand(size) < Density
+            self.grid[0, :] = y.astype(numpy.uint8) # sim 1: random first row
         else:
-            self.grid = numpy.random.randint(0, 2, (size, size)).astype(numpy.uint8) # sim 2: random all state
+            y = numpy.random.rand(size, size) < Density
+            self.grid = y.astype(numpy.uint8) # sim 2: random all state
         for r in range(size):
             for c in range(size):
                 self.cells[r][c].state = int(self.grid[r, c])
@@ -110,7 +114,7 @@ def Automata2GIFF(Options):
     GridSize = Options.GridSize;
 
     # model = XORAutomaton(size = GridSize);
-    model = XORAutomaton(size = GridSize, sim = getattr(Options, "Sim", 1));
+    model = XORAutomaton(size = GridSize, sim = getattr(Options, "Sim", 1), Density = Options.Density);
     frames = []
 
     # Initial frame plus one frame for each generated row.
