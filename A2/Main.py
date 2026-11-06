@@ -28,6 +28,7 @@ class Sim:
         self.W, self.H = cfg["GridSize"]
         self.speed = {"A": float(cfg["A_speed"]), "B": float(cfg["B_speed"])}
         self.t_hold = float(cfg["t_hold"]); self.t_new = float(cfg["t_new"])
+        self.vision = int(cfg.get("vision", 3))  # perception radius (cells)
         self.agents, self.next_id, self.lock = {}, 1, threading.Lock()
         now = time.time()
         for t in "ABC":
@@ -48,6 +49,25 @@ class Sim:
         return [a for a in self.agents.values() if a["t"] == t and a["x"] == x and a["y"] == y]
 
     def remove(self, a): self.agents.pop(a["id"], None)
+
+    # Social skill 1 - Perception: agents of type t within a radius (Manhattan distance)
+    def nearby(self, a, t, radius):
+        return [b for b in self.agents.values()
+                if b["t"] == t and abs(b["x"] - a["x"]) + abs(b["y"] - a["y"]) <= radius]
+
+    # Social skill 2 - Goal-directed movement: chase / flee instead of a random step
+    def choose_move(self, a, opts):
+        dist = lambda p, q: abs(p[0] - q[0]) + abs(p[1] - q[1])
+        if a["t"] == "A":                       # chase the nearest B
+            prey = self.nearby(a, "B", self.vision)
+            if prey:
+                b = min(prey, key=lambda b: dist((a["x"], a["y"]), (b["x"], b["y"])))
+                return min(opts, key=lambda o: dist(o, (b["x"], b["y"])))
+        if a["t"] == "B":                       # run away from the nearest A
+            danger = self.nearby(a, "A", self.vision)
+            if danger:
+                return max(opts, key=lambda o: min(dist(o, (d["x"], d["y"])) for d in danger))
+        return random.choice(opts)              # nothing nearby: random walk
 
     def resolve(self, a, now):
         """a has just settled in cell (x,y): apply the interaction rules."""
@@ -86,7 +106,7 @@ class Sim:
                 elif now >= a["next_move"]:
                     opts = [(a["x"] + dx, a["y"] + dy) for dx, dy in ((1,0),(-1,0),(0,1),(0,-1))
                             if 0 <= a["x"] + dx < self.W and 0 <= a["y"] + dy < self.H]
-                    a["tx"], a["ty"] = random.choice(opts)
+                    a["tx"], a["ty"] = self.choose_move(a, opts)
                     a["moving"], a["t0"], a["dur"] = True, now, 1.0 / self.speed[a["t"]]
 
     def snapshot(self, now):

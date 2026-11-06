@@ -10,3 +10,4 @@ B_file: "./IMG/B.png"
 C_file: "./IMG/C.png"
 t_new: 5            # seconds between new C agents
 t_hold: 1            # seconds A and B rest in a cell
+vision: 3            # cells an agent can see (A chases B, B flees A)
