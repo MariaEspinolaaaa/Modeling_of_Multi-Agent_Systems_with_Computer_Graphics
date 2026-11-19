@@ -1,4 +1,4 @@
-import csv, ast, flask
+import csv, ast, flask, pandas, random
 from pathlib import Path
 
 app = flask.Flask(__name__)
@@ -35,7 +35,25 @@ def data():
 if __name__ == "__main__":
     app.run(debug=True)
 
-def Parameters(Options):   
-    print("Hello World")
+def Parameters(Options):
+    print(Options.Agents)
+    DF=pandas.DataFrame(columns=["Agent", "Node"])
+
+    nodes = load_nodes()
+    start = 1
+    bananas = [n for n, info in nodes.items() if info["dirt"] == 1]
+    elevators = [n for n, info in nodes.items() if info["dirt"] == 0 and n != start]
+
+    for a in range(Options.Agents):
+        agent = a + 1
+        route = [start]
+        route += random.sample(bananas, random.randint(1, len(bananas)))
+        route.append(random.choice(elevators))
+        for node in route:
+            DF.loc[len(DF)] = [agent, node]
+
+    DF.to_csv(BASE / "NodesNew.csv", index=False)
+    print(DF)
+
 def Sim(options):  #python Main.py Sim
     app.run(debug=True)

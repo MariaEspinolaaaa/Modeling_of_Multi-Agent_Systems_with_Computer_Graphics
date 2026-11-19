@@ -10,10 +10,8 @@ def main():
 	subparser.add_argument("--Split", default = 0.8, type = float, help = "Train/Validation proportion");
 	subparser.set_defaults(func = LIB.Sim);
 
-
 	subparser = subparsers.add_parser("Parameters",  description = "Runs the paramenters");
-	subparser.add_argument("--File", required = True, type = str, help = "CSV file comprising the landmarks");
-	subparser.add_argument("--Folder", required = True, type = str, help = "CSV file comprising the landmarks");	
+	subparser.add_argument("--Agents", default = 1, type = int, help = "Number of agents");
 	subparser.set_defaults(func = LIB.Parameters);
 
 	Options = parser.parse_args();
