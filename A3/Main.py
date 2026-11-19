@@ -1,36 +1,29 @@
-import csv, ast, flask
-from pathlib import Path
+import LIB
+import argparse
+import datetime
 
-app = flask.Flask(__name__)
-BASE = Path(__file__).resolve().parent
+def main():
+	parser = argparse.ArgumentParser("A3", description = "A3 for TC2008b");
+	subparsers = parser.add_subparsers();
+	
+	subparser = subparsers.add_parser("Sim",  description = "Runs the simulation");
+	subparser.add_argument("--Split", default = 0.8, type = float, help = "Train/Validation proportion");
+	subparser.set_defaults(func = LIB.Sim);
 
-def load_nodes():
-    nodes = {}
-    with open(BASE / "Nodes.csv", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            point = tuple(float(v) for v in ast.literal_eval(row["Points"]))
-            nodes[int(row["Node"])] = {
-                "node": int(row["Node"]),
-                "point": point,
-                "dirt": int(row["Dirt"])
-            }
-    return nodes
 
-def load_routes():
-    routes = {}
-    with open(BASE / "Routes.csv", newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            agent = int(row["Agent"])
-            routes.setdefault(agent, []).append(int(row["Node"]))
-    return routes
+	subparser = subparsers.add_parser("Parameters",  description = "Runs the paramenters");
+	subparser.add_argument("--File", required = True, type = str, help = "CSV file comprising the landmarks");
+	subparser.add_argument("--Folder", required = True, type = str, help = "CSV file comprising the landmarks");	
+	subparser.set_defaults(func = LIB.Parameters);
 
-@app.route("/")
-def index():
-    return flask.render_template("index.html")
+	Options = parser.parse_args();
+	
+	print(str(Options) + "\n");
 
-@app.route("/api/data")
-def data():
-    return flask.jsonify({"nodes": load_nodes(), "routes": load_routes()})
+	Options.func(Options);
+
 
 if __name__ == "__main__":
-    app.run(debug=True)
+	print("\n" + "\033[0;32m" + "[start] " + str(datetime.datetime.now()) + "\033[0m" + "\n");
+	main();
+	print("\n" + "\033[0;32m" + "[end] "+ str(datetime.datetime.now()) + "\033[0m" + "\n");
