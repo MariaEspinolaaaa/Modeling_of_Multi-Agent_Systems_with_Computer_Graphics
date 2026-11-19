@@ -46,11 +46,11 @@ def Parameters(Options):
 
     for a in range(Options.Agents):
         agent = a + 1
-        route = [start]
-        route += random.sample(bananas, random.randint(1, len(bananas)))
-        route.append(random.choice(elevators))
-        for node in route:
-            DF.loc[len(DF)] = [agent, node]
+        path = [start]
+        path += random.sample(bananas, random.randint(1, len(bananas)))
+        path.append(random.choice(elevators))
+        for p in path:
+            DF.loc[len(DF)] = [agent, p]
 
     DF.to_csv(BASE / "NodesNew.csv", index=False)
     print(DF)
