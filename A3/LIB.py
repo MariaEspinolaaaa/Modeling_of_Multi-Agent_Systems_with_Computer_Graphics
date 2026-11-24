@@ -12,8 +12,7 @@ def load_nodes():
             nodes[int(row["Node"])] = {
                 "node": int(row["Node"]),
                 "point": point,
-                "dirt": int(row["Dirt"]),
-                "charger": int(row.get("Charger") or 0)
+                "dirt": int(row["Dirt"])
             }
     return nodes
 
@@ -80,6 +79,42 @@ def spiral_path():
 
     return numpy.array(path)
 
+def region_shape(n):
+    # rows x cols of regions, as square as possible (4 -> 2x2, 3 -> 1x3, 6 -> 2x3)
+    rows = max(r for r in range(1, int(numpy.sqrt(n)) + 1) if n % r == 0);
+    return rows, n // rows
+
+def region_path(k, n):
+    B = node_matrix();
+    rows, cols = region_shape(n);
+
+    row_blocks = numpy.array_split(numpy.arange(8), rows);
+    col_blocks = numpy.array_split(numpy.arange(8), cols);
+
+    R = B[numpy.ix_(row_blocks[k // cols], col_blocks[k % cols])].copy();
+
+    for i in range(R.shape[0]):
+        if i % 2 == 0: continue
+        R[i,:] = numpy.flip(R[i,:]);
+
+    return R.flatten()
+
+def walk(a, b):
+    # cells from node a to node b moving one cell at a time (first rows, then columns)
+    ra, ca = numpy.unravel_index(a, (8,8));
+    rb, cb = numpy.unravel_index(b, (8,8));
+    path = [];
+
+    step = 1 if rb > ra else -1
+    for r in range(ra + step, rb + step, step) if ra != rb else []:
+        path.append(numpy.ravel_multi_index([r, ca], (8,8)));
+
+    step = 1 if cb > ca else -1
+    for c in range(ca + step, cb + step, step) if ca != cb else []:
+        path.append(numpy.ravel_multi_index([rb, c], (8,8)));
+
+    return path
+
 def Parameters(Options):
     print(Options.Agents)
 
@@ -91,22 +126,21 @@ def Parameters(Options):
 
     DF = DF.assign(Node = numpy.arange(0, 64));
     DF = DF.assign(Points = Points);
-    charger = 63
-    DF = DF.assign(Dirt = numpy.where((DF["Node"] == 0) | (DF["Node"] == charger), 0, 1));
-    DF = DF.assign(Charger = numpy.where(DF["Node"] == charger, 1, 0));
+    DF = DF.assign(Dirt = numpy.where(DF["Node"] == 0, 0, 1));
 
     print(DF)
 
     DF.to_csv(BASE / "NodesNew.csv", index = False);
 
     elevator = 0
-    patterns = [zigzag_path, random_path, spiral_path]
     Routes = [];
 
     for a in range(Options.Agents):
-        path = patterns[a % len(patterns)]();
-        if path[-1] != elevator:
-            path = numpy.append(path, elevator);
+        zone = region_path(a, Options.Agents);
+        path = [elevator] + walk(elevator, zone[0]) + zone[1:].tolist() + walk(zone[-1], elevator);
+        path = numpy.array(path);
+        if zone[0] == elevator:
+            path = numpy.concatenate([zone, walk(zone[-1], elevator)]);
 
         DF = pandas.DataFrame();
         DF = DF.assign( Node = path);

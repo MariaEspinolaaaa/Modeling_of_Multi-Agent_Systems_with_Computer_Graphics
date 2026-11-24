@@ -179,7 +179,7 @@ function draw() {
   gl.clear(gl.COLOR_BUFFER_BIT);
 
   for (const n of Object.values(nodes)) {
-    drawSprite(n.charger ? chargerTex : (n.dirt ? fullTex : emptyTex), n.point, 0.055);
+    drawSprite(n.dirt ? fullTex : emptyTex, n.point, 0.055);
   }
   for (const a of agents) {
     drawSprite(robotTex, agentPosition(a), 0.085);
@@ -227,11 +227,10 @@ async function start() {
   nodes=data.nodes; routes=data.routes;
   makeAgents();
 
-  [robotTex,fullTex,emptyTex,chargerTex]=await Promise.all([
+  [robotTex,fullTex,emptyTex]=await Promise.all([
     createTexture("/static/images/robot.png"),
     createTexture("/static/images/node_full.png"),
-    createTexture("/static/images/node_empty.png"),
-    createTexture("/static/images/charger.png")
+    createTexture("/static/images/node_empty.png")
   ]);
 
   resize();
@@ -240,5 +239,5 @@ async function start() {
   requestAnimationFrame(animate);
 }
 
-let quad, robotTex, fullTex, emptyTex, chargerTex;
+let quad, robotTex, fullTex, emptyTex;
 start().catch(err=>{ console.error(err); info.textContent="Error: "+err.message; });
