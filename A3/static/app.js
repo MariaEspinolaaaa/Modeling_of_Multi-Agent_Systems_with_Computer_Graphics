@@ -1,12 +1,13 @@
 const glCanvas = document.getElementById("glcanvas");
 const info = document.getElementById("info");
 
-let gl, program, textureProgram;
-let nodes = {}, routes = {};
-let agents = [];
-let running = false;
+let gl, colorProgram, textureProgram, quadTex, quadColor;
+let robotTex, dirtTex, chargerTex, lockedTex;
+let data = null, nodes = [], agentIds = [], M = 1, N = 1, totalSteps = 0;
+let simTime = 0;            // in steps (float)
+let stepsPerSecond = 4;
+let paused = false;
 let lastTime = 0;
-const SPEED = 2.0; // world units per second; identical for all agents
 
 const vertexShaderSource = `#version 300 es
 in vec2 a_position;
@@ -82,7 +83,7 @@ function createTexture(url) {
   });
 }
 
-function makeQuad() {
+function makeQuad(program, withUV) {
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   const buf = gl.createBuffer();
@@ -91,13 +92,14 @@ function makeQuad() {
     -1,-1, 0,0,  1,-1, 1,0,  -1,1, 0,1,
     -1,1, 0,1,   1,-1, 1,0,   1,1, 1,1
   ]), gl.STATIC_DRAW);
-
-  const pos = gl.getAttribLocation(textureProgram, "a_position");
-  const uv = gl.getAttribLocation(textureProgram, "a_uv");
+  const pos = gl.getAttribLocation(program, "a_position");
   gl.enableVertexAttribArray(pos);
   gl.vertexAttribPointer(pos,2,gl.FLOAT,false,16,0);
-  gl.enableVertexAttribArray(uv);
-  gl.vertexAttribPointer(uv,2,gl.FLOAT,false,16,8);
+  if (withUV) {
+    const uv = gl.getAttribLocation(program, "a_uv");
+    gl.enableVertexAttribArray(uv);
+    gl.vertexAttribPointer(uv,2,gl.FLOAT,false,16,8);
+  }
   return vao;
 }
 
@@ -110,134 +112,201 @@ function resize() {
   gl.viewport(0,0,glCanvas.width,glCanvas.height);
 }
 
-function project(point) {
-  const xs = Object.values(nodes).map(n=>n.point[0]);
-  const ys = Object.values(nodes).map(n=>n.point[1]);
-  const minX=Math.min(...xs), maxX=Math.max(...xs);
-  const minY=Math.min(...ys), maxY=Math.max(...ys);
-  const px=(point[0]-minX)/(maxX-minX || 1);
-  const py=(point[1]-minY)/(maxY-minY || 1);
-  return [px*1.7-0.85, py*1.5-0.70];
+// ----- layout: square cells, row 0 at the bottom -----
+function layout() {
+  const panel = Math.min(340, innerWidth * 0.35);
+  const availW = innerWidth - panel - 40, availH = innerHeight - 40;
+  const cell = Math.max(4, Math.min(availW / N, availH / M));
+  const x0 = panel + 20 + (availW - cell * N) / 2;
+  const y0 = 20 + (availH - cell * M) / 2;
+  return { cell, x0, y0 };
+}
+function cellCenterPx(col, row) {
+  const L = layout();
+  return [L.x0 + (col + 0.5) * L.cell, L.y0 + (M - row - 0.5) * L.cell];
+}
+function pxToClip(x, y) {
+  return [x / innerWidth * 2 - 1, 1 - y / innerHeight * 2];
+}
+function halfSizeClip(px) {
+  return [px / innerWidth, px / innerHeight];
 }
 
-function makeAgents() {
-  agents = Object.entries(routes).map(([id, route]) => ({
-    id:Number(id), route, segment:0, t:0, done:route.length<2
-  }));
-}
-
-function step(dt) {
-  let allDone=true;
-  for (const a of agents) {
-    if (a.done) continue;
-    allDone=false;
-    const p0=nodes[a.route[a.segment]].point;
-    const p1=nodes[a.route[a.segment+1]].point;
-    const dx=p1[0]-p0[0], dy=p1[1]-p0[1], dz=p1[2]-p0[2];
-    const dist=Math.hypot(dx,dy,dz);
-    a.t += SPEED*dt/Math.max(dist,0.00001);
-    while (a.t >= 1) {
-      a.t -= 1;
-      a.segment++;
-      if (a.segment >= a.route.length-1) {
-        a.segment=a.route.length-1;
-        a.t=0;
-        a.done=true;
-        break;
-      }
-    }
-  }
-  // The simulation ends only after every agent has reached its final route node.
-  if (agents.length && agents.every(a=>a.done)) running=false;
-}
-
-function agentPosition(a) {
-  const node = nodes[a.route[a.segment]];
-  if (a.done || a.segment>=a.route.length-1) return node.point;
-  const next=nodes[a.route[a.segment+1]];
-  return [
-    node.point[0]+(next.point[0]-node.point[0])*a.t,
-    node.point[1]+(next.point[1]-node.point[1])*a.t,
-    node.point[2]+(next.point[2]-node.point[2])*a.t
-  ];
-}
-
-function drawSprite(tex, pos, scale) {
-  gl.useProgram(textureProgram);
-  gl.bindVertexArray(quad);
-  gl.activeTexture(gl.TEXTURE0);
-  gl.bindTexture(gl.TEXTURE_2D,tex);
-  gl.uniform1i(gl.getUniformLocation(textureProgram,"u_texture"),0);
-  const p=project(pos);
-  gl.uniform2f(gl.getUniformLocation(textureProgram,"u_translation"),p[0],p[1]);
-  gl.uniform2f(gl.getUniformLocation(textureProgram,"u_scale"),scale,scale);
+function drawRect(col, row, color, shrink) {
+  const L = layout();
+  const [cx, cy] = cellCenterPx(col, row);
+  const [tx, ty] = pxToClip(cx, cy);
+  const [sx, sy] = halfSizeClip(L.cell * shrink);
+  gl.useProgram(colorProgram);
+  gl.bindVertexArray(quadColor);
+  gl.uniform2f(gl.getUniformLocation(colorProgram,"u_translation"),tx,ty);
+  gl.uniform2f(gl.getUniformLocation(colorProgram,"u_scale"),sx,sy);
+  gl.uniform4fv(gl.getUniformLocation(colorProgram,"u_color"),color);
   gl.drawArrays(gl.TRIANGLES,0,6);
 }
 
+function drawSprite(tex, col, row, shrink) {
+  const L = layout();
+  const [cx, cy] = cellCenterPx(col, row);
+  const [tx, ty] = pxToClip(cx, cy);
+  const [sx, sy] = halfSizeClip(L.cell * shrink);
+  gl.useProgram(textureProgram);
+  gl.bindVertexArray(quadTex);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.uniform1i(gl.getUniformLocation(textureProgram,"u_texture"),0);
+  gl.uniform2f(gl.getUniformLocation(textureProgram,"u_translation"),tx,ty);
+  gl.uniform2f(gl.getUniformLocation(textureProgram,"u_scale"),sx,sy);
+  gl.drawArrays(gl.TRIANGLES,0,6);
+}
+
+function colRow(node) {
+  return [Math.round(node.point[0]), Math.round(node.point[1])];
+}
+
+// ----- state at a given step -----
+function agentAt(id, t) {
+  const route = data.routes[id];
+  const k = Math.min(Math.floor(t), route.length - 1);
+  const k2 = Math.min(k + 1, route.length - 1);
+  const f = Math.min(Math.max(t - k, 0), 1);
+  const a = colRow(data.nodes[route[k]]);
+  const b = colRow(data.nodes[route[k2]]);
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, k];
+}
+
+function movesUntil(id, k) {
+  const route = data.routes[id];
+  let moves = 0;
+  for (let i = 1; i <= k && i < route.length; i++) if (route[i] !== route[i-1]) moves++;
+  return moves;
+}
+
 function draw() {
-  gl.clearColor(0.07,0.07,0.07,1);
+  gl.clearColor(0.07,0.07,0.09,1);
   gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-  for (const n of Object.values(nodes)) {
-    drawSprite(n.dirt ? fullTex : emptyTex, n.point, 0.055);
-  }
-  for (const a of agents) {
-    drawSprite(robotTex, agentPosition(a), 0.085);
+  const step = Math.floor(simTime);
+  let cleaned = 0, visited = 0, dirtyTotal = 0, free = 0;
+
+  for (const n of nodes) {
+    const [c, r] = colRow(n);
+    if (n.locked) {
+      drawRect(c, r, [0.12,0.12,0.14,1], 0.48);
+      drawSprite(lockedTex, c, r, 0.42);
+      continue;
+    }
+    free++;
+    const isVisited = n.firstVisit >= 0 && n.firstVisit <= step;
+    if (isVisited) visited++;
+    drawRect(c, r, isVisited ? [0.24,0.36,0.46,1] : [0.18,0.19,0.23,1], 0.47);
+
+    if (n.charger) drawSprite(chargerTex, c, r, 0.42);
+    if (n.dirt) {
+      dirtyTotal++;
+      const stillDirty = n.cleanedAt < 0 || n.cleanedAt > step;
+      if (stillDirty) drawSprite(dirtTex, c, r, n.charger ? 0.25 : 0.4);
+      else cleaned++;
+    }
   }
 
-  // Labels are rendered as HTML canvas overlay elements.
+  for (const id of agentIds) {
+    const [c, r] = agentAt(id, simTime);
+    drawSprite(robotTex, c, r, 0.46);
+  }
+
   updateLabels();
-  const status = running ? "Running" : "Simulation stopped";
-  const states = agents.map(a=>`Agent ${a.id}: ${a.done ? "finished" : "moving"}`).join(" | ");
-  info.textContent = `${status} | ${states} | Speed: ${SPEED} units/s`;
+  updateInfo(step, cleaned, dirtyTotal, visited, free);
 }
 
 function updateLabels() {
-  document.querySelectorAll(".node-label").forEach(e=>e.remove());
-  for (const n of Object.values(nodes)) {
-    const p=project(n.point);
-    const x=(p[0]+1)*0.5*innerWidth;
-    const y=(1-(p[1]+1)*0.5)*innerHeight;
-    const d=document.createElement("div");
-    d.className="node-label";
-    d.textContent=`Node ${n.node}`;
-    d.style.cssText=`position:fixed;left:${x+12}px;top:${y-8}px;color:white;font-weight:bold;font-size:14px;text-shadow:1px 1px 2px #000;pointer-events:none`;
+  document.querySelectorAll(".agent-label").forEach(e=>e.remove());
+  const L = layout();
+  for (const id of agentIds) {
+    const [c, r] = agentAt(id, simTime);
+    const [x, y] = cellCenterPx(c, r);
+    const d = document.createElement("div");
+    d.className = "agent-label";
+    d.textContent = id;
+    d.style.cssText = `position:fixed;left:${x + L.cell*0.25}px;top:${y - L.cell*0.55}px;` +
+      `color:#fff;background:#e0525a;border-radius:8px;padding:0 5px;font-size:12px;font-weight:bold;pointer-events:none`;
     document.body.appendChild(d);
   }
 }
 
+function updateInfo(step, cleaned, dirtyTotal, visited, free) {
+  const R = data.results;
+  const pct = (a, b) => (b ? (100 * a / b).toFixed(1) : "0.0");
+  const finished = step >= totalSteps;
+  let html = `<b>Room cleaning – Simulation ${R.Simulation}</b><br>`;
+  html += `Grid ${R.Grid} · ${R.Agents} agent(s) · ${R.Trajectory}<br>`;
+  html += `Dirty ${R.DirtyPct}% · Locked ${R.LockedPct}% · Battery ${R.Battery} · Max time ${R.MaxTime}<br>`;
+  html += `<hr>Step <b>${step}</b> / ${totalSteps} ${paused ? "(paused)" : ""} · ${stepsPerSecond} steps/s<br>`;
+  html += `Cleaned: <b>${cleaned}/${dirtyTotal}</b> (${pct(cleaned, dirtyTotal)}%)<br>`;
+  html += `Visited: <b>${visited}/${free}</b> (${pct(visited, free)}%)<br><hr>`;
+  for (const id of agentIds) {
+    const [, , k] = agentAt(id, simTime);
+    const bat = data.battery[id][k];
+    const action = data.actions[id][k];
+    html += `Agent ${id}: 🔋 ${pct(bat, R.Battery)}% · moves ${movesUntil(id, k)} · ${action}<br>`;
+  }
+  if (finished) {
+    html += `<hr><b>Finished</b><br>`;
+    html += R.TimeToClean > 0 ? `Time to clean: <b>${R.TimeToClean}</b> steps<br>`
+                              : `Not all dirt was cleaned (max time / battery)<br>`;
+    html += `Cleaned ${R.CleanedPct}% · Visited ${R.VisitedPct}%<br>`;
+    html += `Moves per agent (mean): ${R.MeanMovesPerAgent} · Recharges: ${R.TotalRecharges}<br>`;
+  }
+  html += `<hr><small>Space: pause · +/−: speed · ←/→: step · R: restart</small>`;
+  info.innerHTML = html;
+}
+
 function animate(t) {
-  const dt=Math.min((t-lastTime)/1000,0.05);
-  lastTime=t;
-  if(running) step(dt);
+  const dt = Math.min((t - lastTime) / 1000, 0.1);
+  lastTime = t;
+  if (!paused && simTime < totalSteps) simTime = Math.min(totalSteps, simTime + dt * stepsPerSecond);
   draw();
   requestAnimationFrame(animate);
 }
 
+addEventListener("keydown", e => {
+  if (e.key === " ") { paused = !paused; e.preventDefault(); }
+  else if (e.key === "+" || e.key === "=") stepsPerSecond = Math.min(64, stepsPerSecond * 2);
+  else if (e.key === "-" || e.key === "_") stepsPerSecond = Math.max(0.5, stepsPerSecond / 2);
+  else if (e.key === "ArrowRight") { paused = true; simTime = Math.min(totalSteps, Math.floor(simTime) + 1); }
+  else if (e.key === "ArrowLeft") { paused = true; simTime = Math.max(0, Math.ceil(simTime) - 1); }
+  else if (e.key === "r" || e.key === "R") { simTime = 0; paused = false; }
+});
+
 async function start() {
-  gl=glCanvas.getContext("webgl2",{alpha:false});
-  if(!gl) { info.textContent="WebGL2 is not supported by this browser."; return; }
+  gl = glCanvas.getContext("webgl2",{alpha:false});
+  if (!gl) { info.textContent = "WebGL2 is not supported by this browser."; return; }
 
-  program=makeProgram(colorVertex,colorFragment);
-  textureProgram=makeProgram(vertexShaderSource,fragmentShaderSource);
-  quad=makeQuad();
+  colorProgram = makeProgram(colorVertex, colorFragment);
+  textureProgram = makeProgram(vertexShaderSource, fragmentShaderSource);
+  quadColor = makeQuad(colorProgram, false);
+  quadTex = makeQuad(textureProgram, true);
 
-  const response=await fetch("/api/data");
-  const data=await response.json();
-  nodes=data.nodes; routes=data.routes;
-  makeAgents();
+  const response = await fetch("/api/data");
+  data = await response.json();
+  nodes = Object.values(data.nodes);
+  agentIds = Object.keys(data.routes);
+  N = Math.max(...nodes.map(n => n.point[0])) + 1;
+  M = Math.max(...nodes.map(n => n.point[1])) + 1;
+  totalSteps = Math.max(...agentIds.map(id => data.routes[id].length - 1));
 
-  [robotTex,fullTex,emptyTex]=await Promise.all([
+  [robotTex, dirtTex, chargerTex, lockedTex] = await Promise.all([
     createTexture("/static/images/robot.png"),
     createTexture("/static/images/node_full.png"),
-    createTexture("/static/images/node_empty.png")
+    createTexture("/static/images/node_empty.png"),
+    createTexture("/static/images/locked.png"),
   ]);
 
   resize();
-  addEventListener("resize",resize);
-  running=true;
+  addEventListener("resize", resize);
   requestAnimationFrame(animate);
 }
 
-let quad, robotTex, fullTex, emptyTex;
-start().catch(err=>{ console.error(err); info.textContent="Error: "+err.message; });
+start().catch(err => { console.error(err); info.textContent = "Error: " + err.message; });

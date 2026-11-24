@@ -1,0 +1,2 @@
+Simulation,Grid,Agents,Trajectory,DirtyPct,LockedPct,Battery,MaxTime,Seed,FreeCells,DirtyCells,LockedCells,StepsSimulated,TimeToClean,VisitedPct,CleanedPct,TotalMoves,MeanMovesPerAgent,TotalRecharges
+2,12x16,3,zigzag,30.0,10.0,50,500,1,173,52,19,221,221,99.42,100.0,651,217.0,12
